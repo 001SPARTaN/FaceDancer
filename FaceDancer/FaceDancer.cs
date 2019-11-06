@@ -107,7 +107,7 @@ namespace FaceDancer
 
             if (args.Length < 2)
             {
-                file = "C:\\Windows\\System32\\nslookup.exe";
+                file = "whoami /priv";
                 if (args.Length == 0)
                 {
                     // If we don't have a process ID as an argument, find winlogon.exe
@@ -150,45 +150,39 @@ namespace FaceDancer
 
             STARTUPINFO startInfo = new STARTUPINFO();
 
-            // INITIALIZE NAMED PIPE CLIENT / SERVER FOR GETTING OUTPUT
-            string pipeName = "FaceDancerPipe";
-
             PipeSecurity sec = new PipeSecurity();
             sec.SetAccessRule(new PipeAccessRule("NT AUTHORITY\\Everyone", PipeAccessRights.FullControl, AccessControlType.Allow));
 
-            NamedPipeServerStream pipeServer = new NamedPipeServerStream(pipeName, PipeDirection.In, 
-                NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Message, PipeOptions.None, 1024, 1024, sec);
-
-            NamedPipeClientStream pipeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, PipeOptions.None);
-            pipeClient.Connect();
-            pipeServer.WaitForConnection();
-            SafePipeHandle clientHandle = pipeClient.SafePipeHandle;
-
-            // Set process to use named pipe for input/output
-            startInfo.hStdOutput = clientHandle.DangerousGetHandle();
-            startInfo.dwFlags = STARTF.STARTF_USESTDHANDLES;
-            // END NAME PIPE INITIALIZATION
-
-            PROCESS_INFORMATION newProc = new PROCESS_INFORMATION();
-            using (StreamReader reader = new StreamReader(pipeServer))
+            using (AnonymousPipeServerStream pipeServer = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable, 4096, sec))
             {
-                bool createProcess = CreateProcessWithTokenW(dupHandle, IntPtr.Zero, null, "\"nslookup.exe\" \"www.google.com\"", IntPtr.Zero, IntPtr.Zero, "C:\\Temp", ref startInfo, out newProc);
-                Process proc = Process.GetProcessById(newProc.dwProcessId);
-                while (!proc.HasExited)
+                using (AnonymousPipeClientStream pipeClient = new AnonymousPipeClientStream(PipeDirection.Out, pipeServer.ClientSafePipeHandle))
                 {
-                    Thread.Sleep(1000);
-                }
-                pipeClient.Close();
-                string output = reader.ReadToEnd();
-                Console.WriteLine("Started process with ID " + newProc.dwProcessId);
-                Console.WriteLine("CreateProcess return code: " + createProcess);
-                Console.WriteLine("Process output: " + output);
-            }
+                    // Set process to use anonymous pipe for input/output
+                    startInfo.hStdOutput = pipeClient.SafePipeHandle.DangerousGetHandle();
+                    startInfo.hStdError = pipeClient.SafePipeHandle.DangerousGetHandle();
+                    startInfo.dwFlags = STARTF.STARTF_USESTDHANDLES | STARTF.STARTF_USESHOWWINDOW;
+                    // END NAME PIPE INITIALIZATION
 
-            pipeServer.Close();
-            
-            CloseHandle(tokenHandle);
-            CloseHandle(dupHandle);
+                    PROCESS_INFORMATION newProc = new PROCESS_INFORMATION();
+                    using (StreamReader reader = new StreamReader(pipeServer))
+                    {
+                        bool createProcess = CreateProcessWithTokenW(dupHandle, IntPtr.Zero, null, file, IntPtr.Zero, IntPtr.Zero, "C:\\Temp", ref startInfo, out newProc);
+                        Process proc = Process.GetProcessById(newProc.dwProcessId);
+                        while (!proc.HasExited)
+                        {
+                            Thread.Sleep(1000);
+                        }
+                        pipeClient.Close();
+                        string output = reader.ReadToEnd();
+                        Console.WriteLine("Started process with ID " + newProc.dwProcessId);
+                        Console.WriteLine("CreateProcess return code: " + createProcess);
+                        Console.WriteLine("Process output: " + output);
+                    }
+                    
+                    CloseHandle(tokenHandle);
+                    CloseHandle(dupHandle);
+                }
+            }
         }
     }
 }
